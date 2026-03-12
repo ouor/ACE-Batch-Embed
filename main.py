@@ -7,6 +7,11 @@ from pathlib import Path
 
 from loguru import logger
 
+from modules.embedding_batch_runner import (
+    collect_encoded_tracks,
+    embed_tracks,
+    write_embedding_report,
+)
 from modules.prompt_batch_runner import (
     BatchRuntimeConfig,
     build_prompt_generator,
@@ -34,6 +39,16 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("output/promptgen_batch_report.json"),
     )
+    parser.add_argument(
+        "--embedding-report-path",
+        type=Path,
+        default=Path("output/promptgen_embedding_report.json"),
+    )
+    parser.add_argument("--embed-model-id", type=str, default="OpenMuQ/MuQ-MuLan-large")
+    parser.add_argument("--embed-device", type=str, default="cuda")
+    parser.set_defaults(enable_embedding=True)
+    parser.add_argument("--enable-embedding", dest="enable_embedding", action="store_true")
+    parser.add_argument("--skip-embedding", dest="enable_embedding", action="store_false")
     parser.add_argument("--duration", type=float, default=-1.0)
     parser.add_argument("--bpm", type=int, default=None)
     parser.add_argument("--keyscale", type=str, default="")
@@ -102,6 +117,20 @@ def main() -> None:
     )
     write_batch_report(args.report_path, results)
     logger.info("Batch generation completed. Report: {}", args.report_path)
+
+    if args.enable_embedding:
+        encoded_tracks = collect_encoded_tracks(results)
+        embedded_tracks = embed_tracks(
+            tracks=encoded_tracks,
+            model_id=args.embed_model_id,
+            device=args.embed_device,
+        )
+        write_embedding_report(args.embedding_report_path, embedded_tracks)
+        logger.info(
+            "Embedding completed. Report: {} (tracks={})",
+            args.embedding_report_path,
+            len(embedded_tracks),
+        )
 
 
 if __name__ == "__main__":
