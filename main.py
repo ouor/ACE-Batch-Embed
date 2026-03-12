@@ -23,6 +23,7 @@ from modules.sqlite_batch_runner import write_embeddings_to_timestamped_sqlite
 from modules.storage_batch_runner import upload_embedded_tracks_to_storage
 from modules.vectordb_batch_runner import upsert_embedded_tracks_to_qdrant
 
+
 def load_project_dotenv(project_root: Path) -> None:
     """Load ``.env`` from project root when python-dotenv is available."""
     try:
@@ -41,6 +42,7 @@ def require_env(name: str) -> str:
     if not value:
         raise ValueError(f"Required environment variable is missing: {name}")
     return value
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for prompt-driven batch generation."""
@@ -115,6 +117,57 @@ def build_runtime_config(args: argparse.Namespace) -> BatchRuntimeConfig:
         output_dir=args.output_dir,
     )
 
+
+def run_embedding_pipeline(args: argparse.Namespace, results: list) -> None:
+    """Run embedding, upload, sqlite export, and optional Qdrant upsert."""
+    encoded_tracks = collect_encoded_tracks(results)
+    embedded_tracks = embed_tracks(
+        tracks=encoded_tracks,
+        model_id=args.embed_model_id,
+        device=args.embed_device,
+    )
+    write_embedding_report(args.embedding_report_path, embedded_tracks)
+    logger.info(
+        "Embedding completed. Report: {} (tracks={})",
+        args.embedding_report_path,
+        len(embedded_tracks),
+    )
+
+    object_key_by_track_id: dict[str, str] | None = None
+    if args.enable_upload and embedded_tracks:
+        object_key_by_track_id = upload_embedded_tracks_to_storage(
+            embedded_tracks=embedded_tracks,
+            endpoint_url=require_env("S3_ENDPOINT_URL"),
+            access_key_id=require_env("S3_ACCESS_KEY_ID"),
+            secret_access_key=require_env("S3_SECRET_ACCESS_KEY"),
+            bucket=require_env("S3_BUCKET"),
+            region_name=os.environ.get("S3_REGION", "us-east-1"),
+            key_prefix=os.environ.get("S3_KEY_PREFIX", "music"),
+        )
+        logger.info("Storage upload completed. Uploaded tracks={}", len(object_key_by_track_id))
+
+    sqlite_path = write_embeddings_to_timestamped_sqlite(
+        embedded_tracks=embedded_tracks,
+        output_dir=args.output_dir,
+        object_key_by_track_id=object_key_by_track_id,
+    )
+    logger.info("SQLite export completed. File: {}", sqlite_path)
+
+    if args.enable_qdrant and embedded_tracks:
+        upserted_count = upsert_embedded_tracks_to_qdrant(
+            embedded_tracks=embedded_tracks,
+            qdrant_url=require_env("QDRANT_URL"),
+            qdrant_api_key=require_env("QDRANT_API_KEY"),
+            collection_name=args.qdrant_collection,
+            object_key_by_track_id=object_key_by_track_id,
+        )
+        logger.info(
+            "Qdrant upsert completed. Collection: {} (tracks={})",
+            args.qdrant_collection,
+            upserted_count,
+        )
+
+
 def main() -> None:
     """Run prompt generation and text2music batch generation end-to-end."""
     args = parse_args()
@@ -146,50 +199,7 @@ def main() -> None:
     logger.info("Batch generation completed. Report: {}", args.report_path)
 
     if args.enable_embedding:
-        encoded_tracks = collect_encoded_tracks(results)
-        embedded_tracks = embed_tracks(
-            tracks=encoded_tracks,
-            model_id=args.embed_model_id,
-            device=args.embed_device,
-        )
-        write_embedding_report(args.embedding_report_path, embedded_tracks)
-        logger.info("Embedding completed. Report: {} (tracks={})", args.embedding_report_path, len(embedded_tracks))
-
-        object_key_by_track_id: dict[str, str] | None = None
-        if args.enable_upload and embedded_tracks:
-            object_key_by_track_id = upload_embedded_tracks_to_storage(
-                embedded_tracks=embedded_tracks,
-                endpoint_url=require_env("S3_ENDPOINT_URL"),
-                access_key_id=require_env("S3_ACCESS_KEY_ID"),
-                secret_access_key=require_env("S3_SECRET_ACCESS_KEY"),
-                bucket=require_env("S3_BUCKET"),
-                region_name=os.environ.get("S3_REGION", "us-east-1"),
-                key_prefix=os.environ.get("S3_KEY_PREFIX", "music"),
-            )
-            logger.info("Storage upload completed. Uploaded tracks={}", len(object_key_by_track_id))
-
-        sqlite_path = write_embeddings_to_timestamped_sqlite(
-            embedded_tracks=embedded_tracks,
-            output_dir=args.output_dir,
-            object_key_by_track_id=object_key_by_track_id,
-        )
-        logger.info("SQLite export completed. File: {}", sqlite_path)
-
-        if args.enable_qdrant and embedded_tracks:
-            qdrant_url = require_env("QDRANT_URL")
-            qdrant_api_key = require_env("QDRANT_API_KEY")
-            upserted_count = upsert_embedded_tracks_to_qdrant(
-                embedded_tracks=embedded_tracks,
-                qdrant_url=qdrant_url,
-                qdrant_api_key=qdrant_api_key,
-                collection_name=args.qdrant_collection,
-                object_key_by_track_id=object_key_by_track_id,
-            )
-            logger.info(
-                "Qdrant upsert completed. Collection: {} (tracks={})",
-                args.qdrant_collection,
-                upserted_count,
-            )
+        run_embedding_pipeline(args=args, results=results)
 
 
 if __name__ == "__main__":
