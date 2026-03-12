@@ -18,7 +18,7 @@ def collect_encoded_tracks(results: list[BatchItemResult]) -> list[EncodedTrack]
     for item in results:
         if not item.success:
             continue
-        for audio in item.audios:
+        for audio_idx, audio in enumerate(item.audios, start=1):
             path_value = str(audio.get("path") or "").strip()
             if not path_value:
                 continue
@@ -27,9 +27,10 @@ def collect_encoded_tracks(results: list[BatchItemResult]) -> list[EncodedTrack]
                 logger.warning("Generated audio path does not exist: {}", encoded_path)
                 continue
             duration_sec = float(audio.get("params", {}).get("duration", 0.0) or 0.0)
+            track_id = str(audio.get("key") or "").strip() or f"batch_{item.index}_{audio_idx}"
             encoded_tracks.append(
                 EncodedTrack(
-                    track_id=f"batch_{item.index}",
+                    track_id=track_id,
                     prompt=item.prompt,
                     encoded_path=encoded_path,
                     duration_sec=duration_sec,

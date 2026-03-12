@@ -45,6 +45,16 @@ class BatchItemResult:
     audios: list[dict]
 
 
+def _sanitize_audios_for_json(audios: list[dict]) -> list[dict]:
+    """Drop non-serializable runtime fields from audio outputs."""
+    sanitized: list[dict] = []
+    for audio in audios:
+        item = dict(audio)
+        item.pop("tensor", None)
+        sanitized.append(item)
+    return sanitized
+
+
 def build_prompt_generator(
     attributes_path: Path,
     clauses_path: Path,
@@ -169,6 +179,10 @@ def run_prompt_batch_generation(
 
 def write_batch_report(report_path: Path, results: list[BatchItemResult]) -> None:
     """Write batch results to a JSON report file."""
-    payload = [asdict(item) for item in results]
+    payload = []
+    for item in results:
+        result_dict = asdict(item)
+        result_dict["audios"] = _sanitize_audios_for_json(item.audios)
+        payload.append(result_dict)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

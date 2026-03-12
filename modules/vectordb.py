@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -18,7 +19,17 @@ class QdrantIndexer:
     vector_size: int
 
     def __post_init__(self) -> None:
-        self._client = QdrantClient(url=self.url, api_key=self.api_key)
+        parsed = urlparse(self.url)
+        if parsed.scheme and parsed.hostname:
+            default_port = 443 if parsed.scheme == "https" else 80
+            self._client = QdrantClient(
+                host=parsed.hostname,
+                port=parsed.port or default_port,
+                https=parsed.scheme == "https",
+                api_key=self.api_key,
+            )
+        else:
+            self._client = QdrantClient(url=self.url, api_key=self.api_key)
         self._ensure_collection()
 
     def _ensure_collection(self) -> None:
