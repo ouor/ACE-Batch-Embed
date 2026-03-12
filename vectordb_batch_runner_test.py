@@ -96,6 +96,40 @@ class TestVectorDbBatchRunner(unittest.TestCase):
 
         self.assertEqual(1, count)
 
+    def test_upsert_embedded_tracks_to_qdrant_uses_uploaded_object_key(self):
+        """When provided, uploaded object keys should be sent to Qdrant payload."""
+        fake_module = types.ModuleType("modules.vectordb")
+        captured = {"object_key": None}
+
+        class _FakeIndexer:
+            def __init__(self, url: str, api_key: str, collection_name: str, vector_size: int):
+                self.vector_size = vector_size
+
+            def upsert(self, embedded, object_key: str):
+                captured["object_key"] = object_key
+
+        fake_module.QdrantIndexer = _FakeIndexer
+        embedded_tracks = [
+            EmbeddedTrack(
+                track_id="t1",
+                prompt="p1",
+                encoded_path=Path("/tmp/a.flac"),
+                duration_sec=1.0,
+                embedding=[0.1, 0.2],
+            )
+        ]
+        with patch.dict("sys.modules", {"modules.vectordb": fake_module}):
+            count = upsert_embedded_tracks_to_qdrant(
+                embedded_tracks=embedded_tracks,
+                qdrant_url="http://localhost:6333",
+                qdrant_api_key="k",
+                collection_name="c",
+                object_key_by_track_id={"t1": "music/t1.flac"},
+            )
+
+        self.assertEqual(1, count)
+        self.assertEqual("music/t1.flac", captured["object_key"])
+
 
 if __name__ == "__main__":
     unittest.main()

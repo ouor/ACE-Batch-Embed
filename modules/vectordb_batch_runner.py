@@ -12,6 +12,7 @@ def upsert_embedded_tracks_to_qdrant(
     qdrant_url: str,
     qdrant_api_key: str,
     collection_name: str,
+    object_key_by_track_id: dict[str, str] | None = None,
 ) -> int:
     """Upsert embedded tracks to Qdrant and return upserted count."""
     if not embedded_tracks:
@@ -39,6 +40,14 @@ def upsert_embedded_tracks_to_qdrant(
                 len(track.embedding),
             )
             continue
-        indexer.upsert(embedded=track, object_key=track.encoded_path.as_posix())
+        object_key = (
+            object_key_by_track_id.get(track.track_id)
+            if object_key_by_track_id is not None
+            else track.encoded_path.as_posix()
+        )
+        if not object_key:
+            logger.warning("Skipping track without object_key: track_id={}", track.track_id)
+            continue
+        indexer.upsert(embedded=track, object_key=object_key)
         upserted_count += 1
     return upserted_count
