@@ -21,6 +21,7 @@ from modules.prompt_batch_runner import (
     run_prompt_batch_generation,
     write_batch_report,
 )
+from modules.storage_batch_runner import upload_embedded_tracks_to_storage
 from modules.vectordb_batch_runner import upsert_embedded_tracks_to_qdrant
 
 
@@ -75,6 +76,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-qdrant", dest="enable_qdrant", action="store_true")
     parser.add_argument("--skip-qdrant", dest="enable_qdrant", action="store_false")
     parser.add_argument("--qdrant-collection", type=str, default="ace_step_tracks")
+    parser.set_defaults(enable_upload=True)
+    parser.add_argument("--enable-upload", dest="enable_upload", action="store_true")
+    parser.add_argument("--skip-upload", dest="enable_upload", action="store_false")
     parser.add_argument("--duration", type=float, default=-1.0)
     parser.add_argument("--bpm", type=int, default=None)
     parser.add_argument("--keyscale", type=str, default="")
@@ -159,6 +163,19 @@ def main() -> None:
             len(embedded_tracks),
         )
 
+        object_key_by_track_id: dict[str, str] | None = None
+        if args.enable_upload and embedded_tracks:
+            object_key_by_track_id = upload_embedded_tracks_to_storage(
+                embedded_tracks=embedded_tracks,
+                endpoint_url=require_env("S3_ENDPOINT_URL"),
+                access_key_id=require_env("S3_ACCESS_KEY_ID"),
+                secret_access_key=require_env("S3_SECRET_ACCESS_KEY"),
+                bucket=require_env("S3_BUCKET"),
+                region_name=os.environ.get("S3_REGION", "us-east-1"),
+                key_prefix=os.environ.get("S3_KEY_PREFIX", "music"),
+            )
+            logger.info("Storage upload completed. Uploaded tracks={}", len(object_key_by_track_id))
+
         if args.enable_qdrant and embedded_tracks:
             qdrant_url = require_env("QDRANT_URL")
             qdrant_api_key = require_env("QDRANT_API_KEY")
@@ -167,6 +184,7 @@ def main() -> None:
                 qdrant_url=qdrant_url,
                 qdrant_api_key=qdrant_api_key,
                 collection_name=args.qdrant_collection,
+                object_key_by_track_id=object_key_by_track_id,
             )
             logger.info(
                 "Qdrant upsert completed. Collection: {} (tracks={})",
