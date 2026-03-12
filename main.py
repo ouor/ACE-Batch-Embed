@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from loguru import logger
@@ -20,6 +21,27 @@ from modules.prompt_batch_runner import (
     run_prompt_batch_generation,
     write_batch_report,
 )
+from modules.vectordb_batch_runner import upsert_embedded_tracks_to_qdrant
+
+
+def load_project_dotenv(project_root: Path) -> None:
+    """Load ``.env`` from project root when python-dotenv is available."""
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        return
+
+    env_path = project_root / ".env"
+    if env_path.exists():
+        load_dotenv(env_path, override=False)
+
+
+def require_env(name: str) -> str:
+    """Return required environment variable value or raise clear error."""
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise ValueError(f"Required environment variable is missing: {name}")
+    return value
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +71,10 @@ def parse_args() -> argparse.Namespace:
     parser.set_defaults(enable_embedding=True)
     parser.add_argument("--enable-embedding", dest="enable_embedding", action="store_true")
     parser.add_argument("--skip-embedding", dest="enable_embedding", action="store_false")
+    parser.set_defaults(enable_qdrant=True)
+    parser.add_argument("--enable-qdrant", dest="enable_qdrant", action="store_true")
+    parser.add_argument("--skip-qdrant", dest="enable_qdrant", action="store_false")
+    parser.add_argument("--qdrant-collection", type=str, default="ace_step_tracks")
     parser.add_argument("--duration", type=float, default=-1.0)
     parser.add_argument("--bpm", type=int, default=None)
     parser.add_argument("--keyscale", type=str, default="")
@@ -94,6 +120,7 @@ def main() -> None:
     args = parse_args()
     config = build_runtime_config(args)
     project_root = Path(__file__).resolve().parent
+    load_project_dotenv(project_root)
 
     prompt_generator = build_prompt_generator(
         attributes_path=args.attributes_path,
@@ -131,6 +158,21 @@ def main() -> None:
             args.embedding_report_path,
             len(embedded_tracks),
         )
+
+        if args.enable_qdrant and embedded_tracks:
+            qdrant_url = require_env("QDRANT_URL")
+            qdrant_api_key = require_env("QDRANT_API_KEY")
+            upserted_count = upsert_embedded_tracks_to_qdrant(
+                embedded_tracks=embedded_tracks,
+                qdrant_url=qdrant_url,
+                qdrant_api_key=qdrant_api_key,
+                collection_name=args.qdrant_collection,
+            )
+            logger.info(
+                "Qdrant upsert completed. Collection: {} (tracks={})",
+                args.qdrant_collection,
+                upserted_count,
+            )
 
 
 if __name__ == "__main__":
