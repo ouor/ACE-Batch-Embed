@@ -1,0 +1,9 @@
+{
+  "key_clause": " in {key_mode}",
+  "bpm_clause": " at around {bpm} BPM",
+  "sub_instrument_clause": ", while the {sub_instrument} provides {sub_role}",
+  "spatial_clause": ", with {spatial_effects}",
+  "ambience_clause": " and {background_ambience}",
+  "structure_clause": ", following a {song_structure} structure",
+  "energy_clause": " with {energy_curve}"
+}
