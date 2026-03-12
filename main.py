@@ -1,11 +1,9 @@
 """Entry point for promptgen-based text2music batch generation."""
-
 from __future__ import annotations
 
 import argparse
 import os
 from pathlib import Path
-
 from loguru import logger
 
 from modules.embedding_batch_runner import (
@@ -21,9 +19,9 @@ from modules.prompt_batch_runner import (
     run_prompt_batch_generation,
     write_batch_report,
 )
+from modules.sqlite_batch_runner import write_embeddings_to_timestamped_sqlite
 from modules.storage_batch_runner import upload_embedded_tracks_to_storage
 from modules.vectordb_batch_runner import upsert_embedded_tracks_to_qdrant
-
 
 def load_project_dotenv(project_root: Path) -> None:
     """Load ``.env`` from project root when python-dotenv is available."""
@@ -43,7 +41,6 @@ def require_env(name: str) -> str:
     if not value:
         raise ValueError(f"Required environment variable is missing: {name}")
     return value
-
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for prompt-driven batch generation."""
@@ -118,7 +115,6 @@ def build_runtime_config(args: argparse.Namespace) -> BatchRuntimeConfig:
         output_dir=args.output_dir,
     )
 
-
 def main() -> None:
     """Run prompt generation and text2music batch generation end-to-end."""
     args = parse_args()
@@ -157,11 +153,7 @@ def main() -> None:
             device=args.embed_device,
         )
         write_embedding_report(args.embedding_report_path, embedded_tracks)
-        logger.info(
-            "Embedding completed. Report: {} (tracks={})",
-            args.embedding_report_path,
-            len(embedded_tracks),
-        )
+        logger.info("Embedding completed. Report: {} (tracks={})", args.embedding_report_path, len(embedded_tracks))
 
         object_key_by_track_id: dict[str, str] | None = None
         if args.enable_upload and embedded_tracks:
@@ -175,6 +167,13 @@ def main() -> None:
                 key_prefix=os.environ.get("S3_KEY_PREFIX", "music"),
             )
             logger.info("Storage upload completed. Uploaded tracks={}", len(object_key_by_track_id))
+
+        sqlite_path = write_embeddings_to_timestamped_sqlite(
+            embedded_tracks=embedded_tracks,
+            output_dir=args.output_dir,
+            object_key_by_track_id=object_key_by_track_id,
+        )
+        logger.info("SQLite export completed. File: {}", sqlite_path)
 
         if args.enable_qdrant and embedded_tracks:
             qdrant_url = require_env("QDRANT_URL")
